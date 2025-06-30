@@ -28,13 +28,6 @@ def test_imports():
         return False
     
     try:
-        from moviepy.editor import VideoFileClip, ImageClip, CompositeVideoClip
-        print("✓ moviepy.editor imports successful")
-    except ImportError as e:
-        print(f"✗ moviepy.editor import failed: {e}")
-        print("This might be due to missing dependencies. Continuing anyway...")
-    
-    try:
         import whisper
         print("✓ whisper imported successfully")
     except ImportError as e:

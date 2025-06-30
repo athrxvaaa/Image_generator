@@ -14,7 +14,17 @@ import hashlib
 from datetime import datetime
 
 import numpy as np
-from moviepy.editor import VideoFileClip, ImageClip, CompositeVideoClip
+# Optional moviepy imports - will be None if not available
+try:
+    from moviepy.editor import VideoFileClip, ImageClip, CompositeVideoClip
+    MOVIEPY_AVAILABLE = True
+except ImportError:
+    VideoFileClip = None
+    ImageClip = None
+    CompositeVideoClip = None
+    MOVIEPY_AVAILABLE = False
+    print("Warning: moviepy.editor not available. Video processing features will be limited.")
+
 import whisper
 from dotenv import load_dotenv
 import openai
