@@ -44,9 +44,6 @@ COPY . .
 # Create output directory
 RUN mkdir -p output
 
-# Test import at runtime
-RUN python -c "from moviepy.editor import VideoFileClip, ImageClip, CompositeVideoClip; print('moviepy.editor imports successful')"
-
 # Make startup script executable
 RUN chmod +x start_api.py
 

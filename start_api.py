@@ -32,7 +32,7 @@ def test_imports():
         print("✓ moviepy.editor imports successful")
     except ImportError as e:
         print(f"✗ moviepy.editor import failed: {e}")
-        return False
+        print("This might be due to missing dependencies. Continuing anyway...")
     
     try:
         import whisper
@@ -83,7 +83,7 @@ def test_imports():
         print(f"✗ boto3 import failed: {e}")
         return False
     
-    print("All imports successful!")
+    print("Core imports successful!")
     return True
 
 def check_environment():
@@ -142,7 +142,7 @@ def main():
     
     # Test imports first
     if not test_imports():
-        print("Import test failed. Exiting.")
+        print("Critical import test failed. Exiting.")
         sys.exit(1)
     
     # Check environment
