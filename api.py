@@ -7,6 +7,7 @@ import os
 import json
 import tempfile
 import shutil
+import asyncio
 from typing import List, Dict, Optional
 from pathlib import Path
 import time
@@ -119,4 +120,93 @@ class VideoProcessor:
             print(f"Error loading Whisper model: {e}")
             raise
 
-    # ... rest of the code remains unchanged ... 
+# Initialize video processor
+try:
+    processor = VideoProcessor()
+except Exception as e:
+    print(f"Failed to initialize VideoProcessor: {e}")
+    processor = None
+
+# API Endpoints
+
+@app.get("/")
+async def root():
+    """Root endpoint"""
+    return {
+        "message": "Video Image Generator API",
+        "version": "1.0.0",
+        "status": "running",
+        "docs": "/docs"
+    }
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "moviepy_available": MOVIEPY_AVAILABLE,
+        "processor_ready": processor is not None
+    }
+
+@app.post("/process-video", response_model=ProcessingStatus)
+async def process_video(
+    background_tasks: BackgroundTasks,
+    video_file: UploadFile = File(...)
+):
+    """Process uploaded video and generate relevant images"""
+    
+    if not processor:
+        raise HTTPException(status_code=500, detail="Video processor not initialized")
+    
+    # Generate unique task ID
+    task_id = str(uuid.uuid4())
+    
+    # Initialize task status
+    task_status[task_id] = ProcessingStatus(
+        task_id=task_id,
+        status="uploading",
+        message="Video uploaded, starting processing..."
+    )
+    
+    # Add background task
+    background_tasks.add_task(process_video_background, task_id, video_file)
+    
+    return task_status[task_id]
+
+@app.get("/status/{task_id}", response_model=ProcessingStatus)
+async def get_status(task_id: str):
+    """Get processing status for a task"""
+    if task_id not in task_status:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    return task_status[task_id]
+
+async def process_video_background(task_id: str, video_file: UploadFile):
+    """Background task to process video"""
+    try:
+        # Update status
+        task_status[task_id].status = "processing"
+        task_status[task_id].message = "Processing video..."
+        
+        # Save uploaded file
+        temp_video_path = os.path.join(processor.temp_dir, f"{task_id}_{video_file.filename}")
+        with open(temp_video_path, "wb") as buffer:
+            shutil.copyfileobj(video_file.file, buffer)
+        
+        # TODO: Implement actual video processing logic here
+        # For now, just simulate processing
+        await asyncio.sleep(2)
+        
+        # Update status to completed
+        task_status[task_id].status = "completed"
+        task_status[task_id].message = "Video processing completed"
+        task_status[task_id].download_url = f"/download/{task_id}"
+        
+    except Exception as e:
+        task_status[task_id].status = "error"
+        task_status[task_id].message = f"Processing failed: {str(e)}"
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000) 

@@ -109,16 +109,21 @@ def create_directories():
 def start_server():
     """Start the FastAPI server"""
     print("\nStarting Video Image Generator API...")
+    
+    # Get port from environment variable
+    port = int(os.getenv('PORT', 8000))
+    print(f"Using port: {port}")
+    
     print("API will be available at:")
-    print("  - Base URL: http://localhost:8000")
-    print("  - Documentation: http://localhost:8000/docs")
-    print("  - Alternative Docs: http://localhost:8000/redoc")
+    print(f"  - Base URL: http://localhost:{port}")
+    print(f"  - Documentation: http://localhost:{port}/docs")
+    print(f"  - Alternative Docs: http://localhost:{port}/redoc")
     print("\nPress Ctrl+C to stop the server")
     print("-" * 50)
     
     try:
         import uvicorn
-        uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=True)
+        uvicorn.run("api:app", host="0.0.0.0", port=port, reload=False, workers=1)
     except KeyboardInterrupt:
         print("\nServer stopped by user")
     except Exception as e:

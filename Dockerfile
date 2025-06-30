@@ -47,6 +47,9 @@ RUN mkdir -p output
 # Make startup script executable
 RUN chmod +x start_api.py
 
+# Set environment variable for port
+ENV PORT=8000
+
 # Expose port
 EXPOSE 8000
 
