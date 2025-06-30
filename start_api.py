@@ -9,41 +9,81 @@ import subprocess
 from pathlib import Path
 from dotenv import load_dotenv
 
-def check_dependencies():
-    """Check if all required dependencies are installed"""
-    print("Checking dependencies...")
+def test_imports():
+    """Test all required imports before starting the application"""
+    print("Testing imports...")
     
     try:
-        import fastapi
-        import uvicorn
-        import openai
-        import whisper
-        import moviepy
-        import numpy
-        import requests
-        from dotenv import load_dotenv
-        print("✓ All Python dependencies are installed")
+        import numpy as np
+        print("✓ numpy imported successfully")
     except ImportError as e:
-        print(f"✗ Missing dependency: {e}")
-        print("Please run: pip install -r requirements.txt")
+        print(f"✗ numpy import failed: {e}")
         return False
     
-    # Check if FFmpeg is installed
     try:
-        result = subprocess.run(['ffmpeg', '-version'], capture_output=True, text=True)
-        if result.returncode == 0:
-            print("✓ FFmpeg is installed")
-        else:
-            print("✗ FFmpeg is not properly installed")
-            return False
-    except FileNotFoundError:
-        print("✗ FFmpeg is not installed")
-        print("Please install FFmpeg:")
-        print("  macOS: brew install ffmpeg")
-        print("  Ubuntu/Debian: sudo apt install ffmpeg")
-        print("  Windows: Download from https://ffmpeg.org/download.html")
+        import moviepy
+        print(f"✓ moviepy imported successfully (version: {moviepy.__version__})")
+    except ImportError as e:
+        print(f"✗ moviepy import failed: {e}")
         return False
     
+    try:
+        from moviepy.editor import VideoFileClip, ImageClip, CompositeVideoClip
+        print("✓ moviepy.editor imports successful")
+    except ImportError as e:
+        print(f"✗ moviepy.editor import failed: {e}")
+        return False
+    
+    try:
+        import whisper
+        print("✓ whisper imported successfully")
+    except ImportError as e:
+        print(f"✗ whisper import failed: {e}")
+        return False
+    
+    try:
+        from dotenv import load_dotenv
+        print("✓ python-dotenv imported successfully")
+    except ImportError as e:
+        print(f"✗ python-dotenv import failed: {e}")
+        return False
+    
+    try:
+        import openai
+        print("✓ openai imported successfully")
+    except ImportError as e:
+        print(f"✗ openai import failed: {e}")
+        return False
+    
+    try:
+        from fastapi import FastAPI
+        print("✓ fastapi imported successfully")
+    except ImportError as e:
+        print(f"✗ fastapi import failed: {e}")
+        return False
+    
+    try:
+        import uvicorn
+        print("✓ uvicorn imported successfully")
+    except ImportError as e:
+        print(f"✗ uvicorn import failed: {e}")
+        return False
+    
+    try:
+        from pydantic import BaseModel
+        print("✓ pydantic imported successfully")
+    except ImportError as e:
+        print(f"✗ pydantic import failed: {e}")
+        return False
+    
+    try:
+        import boto3
+        print("✓ boto3 imported successfully")
+    except ImportError as e:
+        print(f"✗ boto3 import failed: {e}")
+        return False
+    
+    print("All imports successful!")
     return True
 
 def check_environment():
@@ -95,12 +135,14 @@ def start_server():
     return True
 
 def main():
-    """Main function"""
-    print("Video Image Generator API Startup")
-    print("=" * 40)
+    """Main startup function"""
+    print("Starting Video Image Generator API...")
+    print(f"Python version: {sys.version}")
+    print(f"Python path: {sys.path}")
     
-    # Check dependencies
-    if not check_dependencies():
+    # Test imports first
+    if not test_imports():
+        print("Import test failed. Exiting.")
         sys.exit(1)
     
     # Check environment
