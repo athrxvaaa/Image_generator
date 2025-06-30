@@ -1,116 +1,138 @@
-# Script Trimmer
+# Video Image Generator API
 
-A Python script that processes videos by extracting audio, transcribing it using Whisper, analyzing the content with ChatGPT, and inserting custom-generated images using DALL-E.
+A FastAPI-based service that processes videos by extracting audio, transcribing it with Whisper, analyzing content with GPT-4o-mini, generating contextual images with GPT-Image-1, and creating enhanced videos with inserted images.
 
 ## Features
 
-- **Audio Extraction**: Extracts audio from video files
-- **Speech Recognition**: Uses OpenAI's Whisper for accurate word-by-word transcription with timestamps
-- **Content Analysis**: Leverages ChatGPT to identify educational keywords that would benefit from visual illustration
-- **Custom Image Generation**: Uses DALL-E to create educational images that perfectly match the script content
-- **Smart Image Insertion**: Automatically inserts relevant images at appropriate timestamps
-- **Image Caching**: Caches generated images to avoid regenerating the same content
-- **Portrait/Landscape Support**: Automatically detects video orientation and adjusts image generation accordingly
+- **Audio Extraction**: Extracts audio from uploaded videos
+- **Speech Transcription**: Uses OpenAI Whisper for accurate transcription
+- **Content Analysis**: GPT-4o-mini analyzes content and generates topic-specific image suggestions
+- **Image Generation**: GPT-Image-1 creates realistic, contextual images
+- **Video Enhancement**: Inserts generated images into videos at strategic intervals
+- **AWS S3 Integration**: Stores processed videos in S3
+- **RESTful API**: Clean endpoints for upload, status checking, and download
 
-## Requirements
+## Quick Start
+
+### Prerequisites
 
 - Python 3.8+
-- OpenAI API key (for Whisper, ChatGPT, and DALL-E)
-- FFmpeg (for video processing)
+- FFmpeg installed on your system
+- OpenAI API key
+- AWS S3 credentials (optional, for cloud storage)
 
-## Installation
+### Installation
 
-1. Clone or download this repository
-2. Install dependencies:
+1. **Clone the repository**
+
+   ```bash
+   git clone <repository-url>
+   cd Image_generator
+   ```
+
+2. **Install dependencies**
+
    ```bash
    pip install -r requirements.txt
    ```
-3. Install FFmpeg (if not already installed):
-   - **macOS**: `brew install ffmpeg`
-   - **Ubuntu/Debian**: `sudo apt install ffmpeg`
-   - **Windows**: Download from https://ffmpeg.org/download.html
 
-## Setup
+3. **Set up environment variables**
 
-1. Get an OpenAI API key from https://platform.openai.com/api-keys
-2. Set your API key as an environment variable:
    ```bash
-   export OPENAI_API_KEY="your-api-key-here"
-   ```
-   Or create a `.env` file in the project directory:
-   ```
-   OPENAI_API_KEY=your-api-key-here
+   cp env_example.txt .env
+   # Edit .env with your API keys
    ```
 
-## Usage
+4. **Start the API server**
+   ```bash
+   python start_api.py
+   ```
 
-### Basic Usage
+The API will be available at `http://localhost:8000`
 
-```bash
-python script_trimmer.py input_video.mp4
+## API Endpoints
+
+### Upload Video
+
+```http
+POST /upload-video
+Content-Type: multipart/form-data
+
+Parameters:
+- file: Video file (MP4, AVI, MOV, etc.)
+- generate_images: boolean (default: true)
+- image_interval: float (optional, seconds between images)
+- max_images: integer (optional, maximum number of images)
 ```
 
-### Specify Output File
+### Check Status
 
-```bash
-python script_trimmer.py input_video.mp4 -o output_video.mp4
+```http
+GET /status/{task_id}
 ```
 
-### Clean Up Generated Images
+### Download Video
 
-```bash
-python script_trimmer.py --cleanup-images
+```http
+GET /download/{task_id}
 ```
 
-## How It Works
+### Health Check
 
-1. **Audio Extraction**: Extracts audio from the input video
-2. **Transcription**: Uses Whisper to transcribe audio with word-by-word timestamps
-3. **Content Analysis**: ChatGPT analyzes the transcript to identify educational keywords that would benefit from visual illustration
-4. **Image Generation**: DALL-E creates custom educational images based on the identified keywords and context
-5. **Video Processing**: Inserts the generated images at appropriate timestamps in the video
-6. **Output**: Saves the enhanced video with educational images
+```http
+GET /health
+```
 
-## Example
+## Environment Variables
 
-For an educational video about the nervous system:
+Create a `.env` file with the following variables:
 
-- Transcribes words like "brain", "neurons", "signals"
-- ChatGPT identifies these as educational keywords
-- DALL-E generates anatomical diagrams and scientific illustrations
-- Images are inserted when these words are spoken
+```env
+OPENAI_API_KEY=your_openai_api_key_here
+AWS_ACCESS_KEY_ID=your_aws_access_key
+AWS_SECRET_ACCESS_KEY=your_aws_secret_key
+AWS_REGION=ap-south-1
+S3_BUCKET_NAME=your_s3_bucket_name
+```
 
-## Notes
+## Deployment
 
-- The script automatically detects video orientation (portrait/landscape)
-- Generated images are cached to avoid regenerating the same content
-- Processing time depends on video length and number of images generated
-- DALL-E image generation requires OpenAI API credits
+### Local Development
 
-## Troubleshooting
+```bash
+python start_api.py
+```
 
-- **No images inserted**: Check your OpenAI API key and ensure you have sufficient credits
-- **Poor transcription**: Ensure clear audio quality in the input video
-- **Memory issues**: For large videos, consider processing in smaller segments
+### Production Deployment
 
-## Dependencies
+```bash
+# Using uvicorn directly
+uvicorn api:app --host 0.0.0.0 --port 8000
 
-- `moviepy`: Video processing and editing
-- `vosk`: Offline speech recognition
-- `requests`: HTTP requests for Pexels API
-- `Pillow`: Image processing
-- `opencv-python`: Computer vision operations
-- `numpy`: Numerical operations
-- `python-dotenv`: Environment variable management
+# Using gunicorn (recommended for production)
+gunicorn api:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
+```
+
+## Project Structure
+
+```
+Image_generator/
+├── api.py                 # Main FastAPI application
+├── start_api.py          # Server startup script
+├── requirements.txt      # Python dependencies
+├── env_example.txt       # Environment variables template
+├── README.md            # This file
+├── SETUP_GUIDE.md       # Detailed setup instructions
+├── API_README.md        # API documentation
+└── output/              # Processed video storage
+```
+
+## Documentation
+
+- **API Documentation**: Available at `http://localhost:8000/docs` (Swagger UI)
+- **Alternative Docs**: Available at `http://localhost:8000/redoc`
+- **Postman Collection**: `Video_Image_Generator_API.postman_collection.json`
 
 ## License
 
-This project is open source. Feel free to modify and distribute.
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## Support
-
-If you encounter any issues or have questions, please open an issue on the repository.
+This project is licensed under the MIT License.

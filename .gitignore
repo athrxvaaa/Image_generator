@@ -84,4 +84,35 @@ logs/
 
 # Output files
 *_with_images.mp4
-enhanced_*.mp4 
+enhanced_*.mp4
+processed_*.mp4
+
+# Temporary directories
+temp/
+tmp/
+temp_*/
+
+# API keys and secrets
+*.key
+*.pem
+*.p12
+secrets.json
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Backup files
+*.bak
+*.backup
+*_backup.*
+
+# Test files
+test_*.py
+*_test.py
+example_*.py
+
+# Development files
+dev_*.py
+debug_*.py 

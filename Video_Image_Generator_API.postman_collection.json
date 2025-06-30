@@ -1,0 +1,157 @@
+{
+	"info": {
+		"_postman_id": "video-image-generator-api",
+		"name": "Video Image Generator API",
+		"description": "API for processing videos and generating relevant images using AI with S3 upload",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Health Check",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/health",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"health"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Upload Video",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "formdata",
+					"formdata": [
+						{
+							"key": "file",
+							"type": "file",
+							"src": []
+						},
+						{
+							"key": "generate_images",
+							"value": "true",
+							"type": "text"
+						},
+						{
+							"key": "max_images",
+							"value": "5",
+							"type": "text"
+						},
+						{
+							"key": "image_interval",
+							"value": "",
+							"type": "text",
+							"disabled": true
+						}
+					]
+				},
+				"url": {
+					"raw": "{{base_url}}/upload-video",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"upload-video"
+					]
+				},
+				"description": "Upload a video file for processing. The response will include a task_id that you can use to check the processing status. The processed video will be uploaded to AWS S3."
+			},
+			"response": [],
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"// Extract task_id from response and set it as environment variable",
+							"if (pm.response.code === 200) {",
+							"    const response = pm.response.json();",
+							"    pm.environment.set('task_id', response.task_id);",
+							"    console.log('Task ID set:', response.task_id);",
+							"}"
+						],
+						"type": "text/javascript"
+					}
+				}
+			]
+		},
+		{
+			"name": "Check Status",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/status/{{task_id}}",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"status",
+						"{{task_id}}"
+					]
+				},
+				"description": "Check the processing status of a video using the task_id from the upload response. When completed, the response will include both download_url and s3_url."
+			},
+			"response": []
+		},
+		{
+			"name": "Download Video",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/download/{{task_id}}",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"download",
+						"{{task_id}}"
+					]
+				},
+				"description": "Download the processed video file locally. This endpoint will only work when the processing status is 'completed'. You can also access the video via the S3 URL provided in the status response."
+			},
+			"response": []
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8000",
+			"type": "string"
+		},
+		{
+			"key": "task_id",
+			"value": "",
+			"type": "string"
+		}
+	]
+} 
