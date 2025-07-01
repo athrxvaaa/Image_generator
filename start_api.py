@@ -28,13 +28,6 @@ def test_imports():
         return False
     
     try:
-        import whisper
-        print("✓ whisper imported successfully")
-    except ImportError as e:
-        print(f"✗ whisper import failed: {e}")
-        return False
-    
-    try:
         from dotenv import load_dotenv
         print("✓ python-dotenv imported successfully")
     except ImportError as e:
