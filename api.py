@@ -17,17 +17,7 @@ import base64
 from PIL import Image
 
 import numpy as np
-# Optional moviepy imports - will be None if not available
-try: 
-    from moviepy.editor import VideoFileClip, ImageClip, CompositeVideoClip
-    MOVIEPY_AVAILABLE = True
-except ImportError:
-    VideoFileClip = None
-    ImageClip = None
-    CompositeVideoClip = None
-    MOVIEPY_AVAILABLE = False
-    print("Warning: moviepy.editor not available. Video processing features will be limited.")
-
+import subprocess
 from dotenv import load_dotenv
 import openai
 from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, Form
@@ -243,32 +233,61 @@ class VideoProcessor:
             print(f"Error uploading to S3: {e}")
             raise
 
-    def create_video_with_images(self, video_path: str, image_paths: list, output_path: str) -> str:
-        """Insert images at intervals into the video and save as a new video file."""
+    def extract_audio_ffmpeg(self, video_path: str, audio_path: str):
+        """Extract audio from video using FFmpeg."""
         try:
-            if not MOVIEPY_AVAILABLE or not VideoFileClip or not ImageClip or not CompositeVideoClip:
-                raise RuntimeError("MoviePy is not available for video editing.")
-            video = VideoFileClip(video_path)
-            duration = video.duration
+            cmd = [
+                'ffmpeg', '-y', '-i', video_path,
+                '-vn', '-acodec', 'mp3', audio_path
+            ]
+            print(f"Running FFmpeg for audio extraction: {' '.join(cmd)}")
+            subprocess.run(cmd, check=True)
+        except Exception as e:
+            print(f"FFmpeg audio extraction failed: {e}")
+            raise
+
+    def create_video_with_images(self, video_path: str, image_paths: list, output_path: str) -> str:
+        """Insert images at intervals into the video using FFmpeg and save as a new video file."""
+        try:
+            duration = self.get_video_duration(video_path)
             n_images = len(image_paths)
             interval = duration / (n_images + 1)
-            clips = [video]
+            filter_complex = []
+            input_args = ['-i', video_path]
+            overlay_stream = '[0:v]'
             for idx, img_path in enumerate(image_paths):
-                t = (idx + 1) * interval
-                img_clip = (ImageClip(img_path)
-                            .set_duration(2)
-                            .set_start(t)
-                            .set_position(("center", "center"))
-                            .resize(height=video.h // 2))
-                clips.append(img_clip)
-            final = CompositeVideoClip(clips)
-            final.write_videofile(output_path, codec="libx264", audio_codec="aac", fps=video.fps)
-            video.close()
-            final.close()
+                input_args += ['-i', img_path]
+                start_time = (idx + 1) * interval
+                filter_complex.append(f"[{idx+1}:v]format=rgba[img{idx}];")
+                overlay_stream = f"{overlay_stream}[img{idx}]overlay=enable='between(t,{start_time},{start_time+2})':x=(main_w-overlay_w)/2:y=(main_h-overlay_h)/2"
+                if idx < n_images - 1:
+                    overlay_stream += f"[tmp{idx}];[tmp{idx}]"
+            filter_complex_str = ''.join(filter_complex) + overlay_stream
+            cmd = [
+                'ffmpeg', '-y', *input_args,
+                '-filter_complex', filter_complex_str,
+                '-map', '[v]', '-map', '0:a?',
+                '-c:v', 'libx264', '-c:a', 'aac', '-strict', 'experimental',
+                '-movflags', '+faststart', output_path
+            ]
+            print(f"Running FFmpeg for video composition: {' '.join(cmd)}")
+            subprocess.run(cmd, check=True)
             return output_path
         except Exception as e:
-            print(f"Error creating video with images: {e}")
+            print(f"Error creating video with images using FFmpeg: {e}")
             return None
+
+    def get_video_duration(self, video_path: str) -> float:
+        """Get video duration in seconds using ffprobe."""
+        try:
+            result = subprocess.run([
+                'ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+                '-of', 'default=noprint_wrappers=1:nokey=1', video_path
+            ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            return float(result.stdout)
+        except Exception as e:
+            print(f"Error getting video duration: {e}")
+            return 0.0
 
 # Initialize video processor lazily
 processor = None
@@ -302,7 +321,6 @@ async def health_check():
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
-        "moviepy_available": MOVIEPY_AVAILABLE,
         "processor_ready": processor is not None,
         "memory_optimized": True
     }
@@ -368,19 +386,10 @@ async def process_video_background(task_id: str, temp_video_path: str, num_image
         task_status[task_id].status = "processing"
         task_status[task_id].message = "Processing video..."
         processor = get_processor()
-        # Step 1: Extract audio from video
+        # Step 1: Extract audio from video using FFmpeg
         task_status[task_id].message = "Extracting audio from video..."
         temp_audio_path = os.path.join(processor.temp_dir, f"{task_id}_audio.mp3")
-        if MOVIEPY_AVAILABLE and VideoFileClip:
-            try:
-                video = VideoFileClip(temp_video_path)
-                video.audio.write_audiofile(temp_audio_path, verbose=False, logger=None)
-                video.close()
-            except Exception as e:
-                print(f"MoviePy audio extraction failed: {e}")
-                os.system(f'ffmpeg -i "{temp_video_path}" -vn -acodec mp3 "{temp_audio_path}" -y')
-        else:
-            os.system(f'ffmpeg -i "{temp_video_path}" -vn -acodec mp3 "{temp_audio_path}" -y')
+        processor.extract_audio_ffmpeg(temp_video_path, temp_audio_path)
         # Step 2: Transcribe audio using Whisper API
         task_status[task_id].message = "Transcribing audio..."
         transcript = processor.transcribe_audio(temp_audio_path)
@@ -401,7 +410,6 @@ async def process_video_background(task_id: str, temp_video_path: str, num_image
                 print(f"Warning: The following images are missing and will not be included: {missing_images}")
             result = processor.create_video_with_images(temp_video_path, existing_image_paths, processed_video_path)
             if result and os.path.exists(processed_video_path):
-                # Optionally upload video to S3
                 s3_video_key = f"results/{task_id}_with_images.mp4"
                 processor.upload_to_s3(processed_video_path, s3_video_key)
             else:
@@ -459,17 +467,8 @@ async def download_results(task_id: str):
     processed_video_path = os.path.join(processor.output_dir, f"{task_id}_with_images.mp4")
     if os.path.exists(processed_video_path):
         return FileResponse(processed_video_path, media_type="video/mp4", filename=f"{task_id}_with_images.mp4")
-    results_file_path = os.path.join(processor.output_dir, f"{task_id}_results.json")
-    if os.path.exists(results_file_path):
-        with open(results_file_path, "r") as f:
-            data = json.load(f)
-        s3_key = f"results/{task_id}_results.json"
-        s3_url = f"https://{processor.s3_bucket}.s3.amazonaws.com/{s3_key}"
-        data["s3_url"] = s3_url
-        data["download_url"] = f"/download/{task_id}"
-        return data
     else:
-        return {"error": "Results file not found", "task_id": task_id}
+        raise HTTPException(status_code=404, detail="Processed video not found.")
 
 if __name__ == "__main__":
     import uvicorn
