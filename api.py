@@ -247,19 +247,27 @@ class VideoProcessor:
             raise
 
     def create_video_with_images(self, video_path: str, image_paths: list, output_path: str) -> str:
-        """Insert images at intervals into the video using FFmpeg and save as a new video file."""
+        """Insert images at intervals into the video using FFmpeg and save as a new video file. Convert overlays to JPEG and optimize FFmpeg for low memory."""
         try:
             duration = self.get_video_duration(video_path)
             n_images = len(image_paths)
             interval = duration / (n_images + 1)
             filter_complex = []
             input_args = ['-i', video_path]
-            overlay_stream = '[0:v]'
+            jpeg_image_paths = []
             for idx, img_path in enumerate(image_paths):
-                input_args += ['-i', img_path]
+                # Convert PNG to JPEG for lower memory usage
+                jpg_path = img_path.replace('.png', '.jpg')
+                if not os.path.exists(jpg_path):
+                    img = Image.open(img_path)
+                    img = img.convert('RGB')
+                    img.save(jpg_path, 'JPEG', quality=90)
+                jpeg_image_paths.append(jpg_path)
+                input_args += ['-i', jpg_path]
+            overlay_stream = '[0:v]'
+            for idx, jpg_path in enumerate(jpeg_image_paths):
                 start_time = (idx + 1) * interval
                 filter_complex.append(f"[{idx+1}:v]format=rgba[img{idx}];")
-                # For all but the last overlay, chain to [tmpN], for the last, chain to [v]
                 if idx < n_images - 1:
                     overlay_stream = f"{overlay_stream}[img{idx}]overlay=enable='between(t,{start_time},{start_time+2})':x=(main_w-overlay_w)/2:y=(main_h-overlay_h)/2[tmp{idx}];[tmp{idx}]"
                 else:
@@ -270,7 +278,9 @@ class VideoProcessor:
                 '-filter_complex', filter_complex_str,
                 '-map', '[v]', '-map', '0:a?',
                 '-c:v', 'libx264', '-c:a', 'aac', '-strict', 'experimental',
-                '-movflags', '+faststart', output_path
+                '-movflags', '+faststart',
+                '-threads', '1', '-preset', 'ultrafast',
+                output_path
             ]
             print(f"Running FFmpeg for video composition: {' '.join(cmd)}")
             subprocess.run(cmd, check=True)
