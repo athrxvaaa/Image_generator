@@ -390,14 +390,28 @@ async def process_video_background(task_id: str, temp_video_path: str, num_image
         # Step 4: Generate images using DALL-E
         task_status[task_id].message = "Generating images..."
         image_urls = processor.generate_images(analysis, num_images=num_images, task_id=task_id)
-        # Step 5: Create video with images
+        # Step 5: Create video with images (robust check)
         image_paths = [os.path.join(processor.output_dir, f"{task_id}_image_{i+1}.png") for i in range(num_images)]
+        existing_image_paths = [p for p in image_paths if os.path.exists(p)]
+        missing_images = [p for p in image_paths if not os.path.exists(p)]
         processed_video_path = os.path.join(processor.output_dir, f"{task_id}_with_images.mp4")
-        if all(os.path.exists(p) for p in image_paths):
-            processor.create_video_with_images(temp_video_path, image_paths, processed_video_path)
-            # Optionally upload video to S3
-            s3_video_key = f"results/{task_id}_with_images.mp4"
-            processor.upload_to_s3(processed_video_path, s3_video_key)
+        if existing_image_paths:
+            print(f"Images found for video creation: {existing_image_paths}")
+            if missing_images:
+                print(f"Warning: The following images are missing and will not be included: {missing_images}")
+            result = processor.create_video_with_images(temp_video_path, existing_image_paths, processed_video_path)
+            if result and os.path.exists(processed_video_path):
+                # Optionally upload video to S3
+                s3_video_key = f"results/{task_id}_with_images.mp4"
+                processor.upload_to_s3(processed_video_path, s3_video_key)
+            else:
+                print(f"Error: Video creation failed for task {task_id}.")
+                task_status[task_id].status = "error"
+                task_status[task_id].message = f"Video creation failed. Check logs for details."
+        else:
+            print(f"No images found for video creation for task {task_id}. Skipping video creation.")
+            task_status[task_id].status = "error"
+            task_status[task_id].message = "No images were generated for video creation."
         # Step 6: Create results file
         task_status[task_id].message = "Creating results file..."
         results = {
@@ -420,10 +434,11 @@ async def process_video_background(task_id: str, temp_video_path: str, num_image
             os.remove(temp_audio_path)
         except:
             pass
-        # Update status to completed
-        task_status[task_id].status = "completed"
-        task_status[task_id].message = "Video processing completed successfully"
-        task_status[task_id].s3_url = s3_url
+        # Update status to completed if not already error
+        if task_status[task_id].status != "error":
+            task_status[task_id].status = "completed"
+            task_status[task_id].message = "Video processing completed successfully"
+            task_status[task_id].s3_url = s3_url
     except Exception as e:
         task_status[task_id].status = "error"
         task_status[task_id].message = f"Processing failed: {str(e)}"
