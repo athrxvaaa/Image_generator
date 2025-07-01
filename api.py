@@ -13,6 +13,8 @@ from pathlib import Path
 import time
 import hashlib
 from datetime import datetime
+import base64
+from PIL import Image
 
 import numpy as np
 # Optional moviepy imports - will be None if not available
@@ -165,12 +167,11 @@ class VideoProcessor:
             print(f"Error analyzing content: {e}")
             raise
 
-    def generate_images(self, description: str, num_images: int = 3) -> List[str]:
+    def generate_images(self, description: str, num_images: int = 3, task_id: str = None) -> list:
         """Generate images based on description using GPT-Image-1 (portrait, medium quality)"""
         image_urls = []
         try:
             print(f"Generating {num_images} images based on description...")
-            # Create a detailed prompt for image generation
             image_prompt = f"""
             Create a high-quality, realistic portrait image based on this description: {description}
             Requirements:
@@ -188,17 +189,30 @@ class VideoProcessor:
                     response = self.openai_client.images.generate(
                         model="gpt-image-1",
                         prompt=image_prompt,
-                        size="1024x1536",  # Supported portrait size by OpenAI
+                        size="1024x1536",
                         quality="medium",
                         n=1
                     )
                     print(f"OpenAI image response: {response}")
-                    # Defensive extraction
                     image_url = None
-                    if hasattr(response, "data") and response.data and hasattr(response.data[0], "url"):
-                        image_url = response.data[0].url
+                    # Handle b64_json (base64 image)
+                    if hasattr(response, "data") and response.data:
+                        data = response.data[0]
+                        if hasattr(data, "url") and data.url:
+                            image_url = data.url
+                        elif hasattr(data, "b64_json") and data.b64_json:
+                            # Save base64 image to PNG
+                            img_data = base64.b64decode(data.b64_json)
+                            img_path = os.path.join(self.output_dir, f"{task_id}_image_{i+1}.png")
+                            with open(img_path, "wb") as img_file:
+                                img_file.write(img_data)
+                            # Upload to S3
+                            s3_key = f"results/{task_id}_image_{i+1}.png"
+                            image_url = self.upload_to_s3(img_path, s3_key)
+                        else:
+                            image_url = f"ERROR: No image URL or b64_json returned. Response: {response}"
                     else:
-                        image_url = f"ERROR: No image URL returned. Response: {response}"
+                        image_url = f"ERROR: No image data returned. Response: {response}"
                     image_urls.append(image_url)
                     print(f"Image {i+1} generated: {image_url}")
                 except Exception as e:
@@ -228,6 +242,33 @@ class VideoProcessor:
         except Exception as e:
             print(f"Error uploading to S3: {e}")
             raise
+
+    def create_video_with_images(self, video_path: str, image_paths: list, output_path: str) -> str:
+        """Insert images at intervals into the video and save as a new video file."""
+        try:
+            if not MOVIEPY_AVAILABLE or not VideoFileClip or not ImageClip or not CompositeVideoClip:
+                raise RuntimeError("MoviePy is not available for video editing.")
+            video = VideoFileClip(video_path)
+            duration = video.duration
+            n_images = len(image_paths)
+            interval = duration / (n_images + 1)
+            clips = [video]
+            for idx, img_path in enumerate(image_paths):
+                t = (idx + 1) * interval
+                img_clip = (ImageClip(img_path)
+                            .set_duration(2)
+                            .set_start(t)
+                            .set_position(("center", "center"))
+                            .resize(height=video.h // 2))
+                clips.append(img_clip)
+            final = CompositeVideoClip(clips)
+            final.write_videofile(output_path, codec="libx264", audio_codec="aac", fps=video.fps)
+            video.close()
+            final.close()
+            return output_path
+        except Exception as e:
+            print(f"Error creating video with images: {e}")
+            return None
 
 # Initialize video processor lazily
 processor = None
@@ -326,7 +367,6 @@ async def process_video_background(task_id: str, temp_video_path: str):
         task_status[task_id].status = "processing"
         task_status[task_id].message = "Processing video..."
         processor = get_processor()
-
         # Step 1: Extract audio from video
         task_status[task_id].message = "Extracting audio from video..."
         temp_audio_path = os.path.join(processor.temp_dir, f"{task_id}_audio.mp3")
@@ -340,20 +380,24 @@ async def process_video_background(task_id: str, temp_video_path: str):
                 os.system(f'ffmpeg -i "{temp_video_path}" -vn -acodec mp3 "{temp_audio_path}" -y')
         else:
             os.system(f'ffmpeg -i "{temp_video_path}" -vn -acodec mp3 "{temp_audio_path}" -y')
-
         # Step 2: Transcribe audio using Whisper API
         task_status[task_id].message = "Transcribing audio..."
         transcript = processor.transcribe_audio(temp_audio_path)
-
         # Step 3: Analyze content using ChatGPT
         task_status[task_id].message = "Analyzing content..."
         analysis = processor.analyze_content(transcript)
-
         # Step 4: Generate images using DALL-E
         task_status[task_id].message = "Generating images..."
-        image_urls = processor.generate_images(analysis, num_images=3)
-
-        # Step 5: Create results file
+        image_urls = processor.generate_images(analysis, num_images=3, task_id=task_id)
+        # Step 5: Create video with images
+        image_paths = [os.path.join(processor.output_dir, f"{task_id}_image_{i+1}.png") for i in range(3)]
+        processed_video_path = os.path.join(processor.output_dir, f"{task_id}_with_images.mp4")
+        if all(os.path.exists(p) for p in image_paths):
+            processor.create_video_with_images(temp_video_path, image_paths, processed_video_path)
+            # Optionally upload video to S3
+            s3_video_key = f"results/{task_id}_with_images.mp4"
+            processor.upload_to_s3(processed_video_path, s3_video_key)
+        # Step 6: Create results file
         task_status[task_id].message = "Creating results file..."
         results = {
             "task_id": task_id,
@@ -365,24 +409,20 @@ async def process_video_background(task_id: str, temp_video_path: str):
         results_file_path = os.path.join(processor.output_dir, f"{task_id}_results.json")
         with open(results_file_path, "w") as f:
             json.dump(results, f, indent=2)
-
-        # Step 6: Upload results to S3
+        # Step 7: Upload results to S3
         task_status[task_id].message = "Uploading results to S3..."
         s3_key = f"results/{task_id}_results.json"
         s3_url = processor.upload_to_s3(results_file_path, s3_key)
-
         # Clean up temporary files
         try:
             os.remove(temp_video_path)
             os.remove(temp_audio_path)
         except:
             pass
-
         # Update status to completed
         task_status[task_id].status = "completed"
         task_status[task_id].message = "Video processing completed successfully"
         task_status[task_id].s3_url = s3_url
-
     except Exception as e:
         task_status[task_id].status = "error"
         task_status[task_id].message = f"Processing failed: {str(e)}"
@@ -400,11 +440,13 @@ async def test_endpoint():
 @app.get("/download/{task_id}")
 async def download_results(task_id: str):
     processor = get_processor()
+    processed_video_path = os.path.join(processor.output_dir, f"{task_id}_with_images.mp4")
+    if os.path.exists(processed_video_path):
+        return FileResponse(processed_video_path, media_type="video/mp4", filename=f"{task_id}_with_images.mp4")
     results_file_path = os.path.join(processor.output_dir, f"{task_id}_results.json")
     if os.path.exists(results_file_path):
         with open(results_file_path, "r") as f:
             data = json.load(f)
-        # Always include S3 URL if possible
         s3_key = f"results/{task_id}_results.json"
         s3_url = f"https://{processor.s3_bucket}.s3.amazonaws.com/{s3_key}"
         data["s3_url"] = s3_url
