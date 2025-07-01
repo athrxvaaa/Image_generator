@@ -167,46 +167,48 @@ class VideoProcessor:
 
     def generate_images(self, description: str, num_images: int = 3) -> List[str]:
         """Generate images based on description using GPT-Image-1 (portrait, medium quality)"""
+        image_urls = []
         try:
             print(f"Generating {num_images} images based on description...")
-            
             # Create a detailed prompt for image generation
             image_prompt = f"""
             Create a high-quality, realistic portrait image based on this description: {description}
-            
             Requirements:
             - High resolution and professional quality
             - Realistic and detailed
             - Full-screen composition
             - Natural lighting and colors
             - Clear and focused subject matter
-            
             Style: Photorealistic, professional photography
             Orientation: Portrait
             """
-            
-            image_urls = []
             for i in range(num_images):
                 print(f"Generating image {i+1}/{num_images}...")
-                
-                response = self.openai_client.images.generate(
-                    model="gpt-image-1",
-                    prompt=image_prompt,
-                    size="1024x1536",  # Supported portrait size by OpenAI
-                    quality="medium",
-                    n=1
-                )
-                
-                image_url = response.data[0].url
-                image_urls.append(image_url)
-                print(f"Image {i+1} generated successfully")
-            
-            print(f"All {num_images} images generated successfully")
+                try:
+                    response = self.openai_client.images.generate(
+                        model="gpt-image-1",
+                        prompt=image_prompt,
+                        size="1024x1536",  # Supported portrait size by OpenAI
+                        quality="medium",
+                        n=1
+                    )
+                    print(f"OpenAI image response: {response}")
+                    # Defensive extraction
+                    image_url = None
+                    if hasattr(response, "data") and response.data and hasattr(response.data[0], "url"):
+                        image_url = response.data[0].url
+                    else:
+                        image_url = f"ERROR: No image URL returned. Response: {response}"
+                    image_urls.append(image_url)
+                    print(f"Image {i+1} generated: {image_url}")
+                except Exception as e:
+                    print(f"Error generating image {i+1}: {e}")
+                    image_urls.append(f"ERROR: {str(e)}")
+            print(f"All {num_images} images processed.")
             return image_urls
-            
         except Exception as e:
-            print(f"Error generating images: {e}")
-            raise
+            print(f"Error in generate_images: {e}")
+            return [f"ERROR: {str(e)}"] * num_images
 
     def upload_to_s3(self, file_path: str, s3_key: str) -> str:
         """Upload file to S3 and return public URL"""
@@ -300,10 +302,23 @@ async def process_video(
 @app.get("/status/{task_id}", response_model=ProcessingStatus)
 async def get_status(task_id: str):
     """Get processing status for a task"""
-    if task_id not in task_status:
-        raise HTTPException(status_code=404, detail="Task not found")
-    
-    return task_status[task_id]
+    status = task_status.get(task_id)
+    if not status:
+        raise HTTPException(status_code=404, detail="Task ID not found")
+    # Try to set download_url and s3_url if not already set
+    processor = None
+    try:
+        processor = get_processor()
+    except Exception:
+        pass
+    if processor:
+        results_file_path = os.path.join(processor.output_dir, f"{task_id}_results.json")
+        if os.path.exists(results_file_path):
+            status.download_url = f"/download/{task_id}"
+        s3_key = f"results/{task_id}_results.json"
+        s3_url = f"https://{processor.s3_bucket}.s3.amazonaws.com/{s3_key}"
+        status.s3_url = s3_url
+    return status
 
 async def process_video_background(task_id: str, temp_video_path: str):
     """Background task to process video"""
@@ -384,13 +399,19 @@ async def test_endpoint():
 
 @app.get("/download/{task_id}")
 async def download_results(task_id: str):
-    results_file_path = os.path.join("output", f"{task_id}_results.json")
+    processor = get_processor()
+    results_file_path = os.path.join(processor.output_dir, f"{task_id}_results.json")
     if os.path.exists(results_file_path):
-        return FileResponse(results_file_path, media_type="application/json", filename=f"{task_id}_results.json")
+        with open(results_file_path, "r") as f:
+            data = json.load(f)
+        # Always include S3 URL if possible
+        s3_key = f"results/{task_id}_results.json"
+        s3_url = f"https://{processor.s3_bucket}.s3.amazonaws.com/{s3_key}"
+        data["s3_url"] = s3_url
+        data["download_url"] = f"/download/{task_id}"
+        return data
     else:
-        # Return the S3 URL if the file is not found locally
-        s3_url = f"https://{os.getenv('S3_BUCKET_NAME')}.s3.amazonaws.com/results/{task_id}_results.json"
-        return {"detail": "Not Found locally. Download from S3.", "s3_url": s3_url}
+        return {"error": "Results file not found", "task_id": task_id}
 
 if __name__ == "__main__":
     import uvicorn
