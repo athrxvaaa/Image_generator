@@ -35,17 +35,11 @@ COPY requirements.txt .
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# Verify moviepy installation
-RUN python -c "import moviepy; print('moviepy version:', moviepy.__version__)"
-
 # Copy application code
 COPY . .
 
 # Create output directory
 RUN mkdir -p output
-
-# Make startup script executable
-RUN chmod +x start_api.py
 
 # Set environment variable for port
 ENV PORT=8000
@@ -57,5 +51,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Run the application using the startup script
-CMD ["python", "start_api.py"] 
+# Run the application directly with uvicorn for faster startup
+CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"] 
