@@ -1,51 +1,31 @@
 FROM python:3.11-slim
 
-# Set working directory
-WORKDIR /app
-
-# Install system dependencies including FFmpeg and other required packages
-RUN apt-get update && apt-get install -y \
+# Install minimal system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libsm6 \
     libxext6 \
-    libxrender-dev \
-    libgomp1 \
-    libglib2.0-0 \
     libgl1-mesa-glx \
-    libgtk-3-0 \
-    libavcodec-dev \
-    libavformat-dev \
-    libswscale-dev \
-    libv4l-dev \
-    libxvidcore-dev \
-    libx264-dev \
-    libjpeg-dev \
-    libpng-dev \
-    libtiff-dev \
-    libatlas-base-dev \
-    gfortran \
-    wget \
-    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for better caching
+# Set working directory
+WORKDIR /app
+
+# Copy only requirements first for better caching
 COPY requirements.txt .
 
-# Upgrade pip and install Python dependencies
+# Upgrade pip and install Python dependencies in one layer
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
+# Copy the rest of the application code
 COPY . .
-
-# Create output directory
-RUN mkdir -p output
-
-# Set environment variable for port
-ENV PORT=8000
 
 # Expose port
 EXPOSE 8000
+
+# Set environment variable for port
+ENV PORT=8000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \

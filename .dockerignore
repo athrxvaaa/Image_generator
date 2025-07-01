@@ -3,7 +3,7 @@
 .gitignore
 
 # Python
-__pycache__
+__pycache__/
 *.pyc
 *.pyo
 *.pyd
@@ -19,10 +19,10 @@ nosetests.xml
 coverage.xml
 *.cover
 *.log
-.git
-.mypy_cache
-.pytest_cache
-.hypothesis
+.git/
+output/
+.env
+.DS_Store
 
 # Virtual environments
 venv/
