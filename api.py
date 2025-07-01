@@ -17,7 +17,7 @@ from datetime import datetime
 import numpy as np
 # Optional moviepy imports - will be None if not available
 try: 
-    from moviepy.editor import VideoFileClip, ImageClip, CompositeVideoClip
+from moviepy.editor import VideoFileClip, ImageClip, CompositeVideoClip
     MOVIEPY_AVAILABLE = True
 except ImportError:
     VideoFileClip = None
@@ -192,7 +192,7 @@ class VideoProcessor:
                 response = self.openai_client.images.generate(
                     model="gpt-image-1",
                     prompt=image_prompt,
-                    size="1024x1792",  # Portrait size supported by OpenAI
+                    size="1024x1536",  # Supported portrait size by OpenAI
                     quality="medium",
                     n=1
                 )
