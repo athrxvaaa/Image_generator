@@ -166,7 +166,7 @@ class VideoProcessor:
             raise
 
     def generate_images(self, description: str, num_images: int = 3) -> List[str]:
-        """Generate images based on description using GPT-Image-1 (portrait, standard quality)"""
+        """Generate images based on description using GPT-Image-1 (portrait, medium quality)"""
         try:
             print(f"Generating {num_images} images based on description...")
             
@@ -193,7 +193,7 @@ class VideoProcessor:
                     model="gpt-image-1",
                     prompt=image_prompt,
                     size="1024x1792",  # Portrait size supported by OpenAI
-                    quality="standard",
+                    quality="medium",
                     n=1
                 )
                 
