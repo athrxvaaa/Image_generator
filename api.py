@@ -17,7 +17,7 @@ from datetime import datetime
 import numpy as np
 # Optional moviepy imports - will be None if not available
 try: 
-from moviepy.editor import VideoFileClip, ImageClip, CompositeVideoClip
+    from moviepy.editor import VideoFileClip, ImageClip, CompositeVideoClip
     MOVIEPY_AVAILABLE = True
 except ImportError:
     VideoFileClip = None
