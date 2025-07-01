@@ -322,9 +322,9 @@ async def process_video_background(task_id: str, temp_video_path: str):
                 video.close()
             except Exception as e:
                 print(f"MoviePy audio extraction failed: {e}")
-                os.system(f"ffmpeg -i {temp_video_path} -vn -acodec mp3 {temp_audio_path} -y")
+                os.system(f'ffmpeg -i "{temp_video_path}" -vn -acodec mp3 "{temp_audio_path}" -y')
         else:
-            os.system(f"ffmpeg -i {temp_video_path} -vn -acodec mp3 {temp_audio_path} -y")
+            os.system(f'ffmpeg -i "{temp_video_path}" -vn -acodec mp3 "{temp_audio_path}" -y')
 
         # Step 2: Transcribe audio using Whisper API
         task_status[task_id].message = "Transcribing audio..."
