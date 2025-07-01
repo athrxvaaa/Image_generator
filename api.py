@@ -16,7 +16,7 @@ from datetime import datetime
 
 import numpy as np
 # Optional moviepy imports - will be None if not available
-try:
+try: 
     from moviepy.editor import VideoFileClip, ImageClip, CompositeVideoClip
     MOVIEPY_AVAILABLE = True
 except ImportError:
@@ -270,27 +270,31 @@ async def process_video(
     video_file: UploadFile = File(...)
 ):
     """Process uploaded video and generate relevant images"""
-    
     try:
         processor = get_processor()
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to initialize processor: {str(e)}")
-    
+
     # Generate unique task ID
     task_id = str(uuid.uuid4())
-    
+
+    # Save the uploaded file immediately
+    temp_video_path = os.path.join(tempfile.gettempdir(), f"{task_id}_{video_file.filename}")
+    with open(temp_video_path, "wb") as buffer:
+        shutil.copyfileobj(video_file.file, buffer)
+
     # Initialize task status
     task_status[task_id] = ProcessingStatus(
         task_id=task_id,
         status="uploading",
         message="Video uploaded, starting processing..."
     )
-    
-    # Add background task
-    background_tasks.add_task(process_video_background, task_id, video_file)
-    
+
+    # Add background task with the saved file path
+    background_tasks.add_task(process_video_background, task_id, temp_video_path)
+
     return task_status[task_id]
 
 @app.get("/status/{task_id}", response_model=ProcessingStatus)
@@ -301,26 +305,16 @@ async def get_status(task_id: str):
     
     return task_status[task_id]
 
-async def process_video_background(task_id: str, video_file: UploadFile):
+async def process_video_background(task_id: str, temp_video_path: str):
     """Background task to process video"""
     try:
-        # Update status
         task_status[task_id].status = "processing"
         task_status[task_id].message = "Processing video..."
-        
-        # Get processor
         processor = get_processor()
-        
-        # Save uploaded file
-        temp_video_path = os.path.join(processor.temp_dir, f"{task_id}_{video_file.filename}")
-        with open(temp_video_path, "wb") as buffer:
-            shutil.copyfileobj(video_file.file, buffer)
-        
+
         # Step 1: Extract audio from video
         task_status[task_id].message = "Extracting audio from video..."
         temp_audio_path = os.path.join(processor.temp_dir, f"{task_id}_audio.mp3")
-        
-        # Use ffmpeg to extract audio (if moviepy is not available)
         if MOVIEPY_AVAILABLE and VideoFileClip:
             try:
                 video = VideoFileClip(temp_video_path)
@@ -328,24 +322,22 @@ async def process_video_background(task_id: str, video_file: UploadFile):
                 video.close()
             except Exception as e:
                 print(f"MoviePy audio extraction failed: {e}")
-                # Fallback to ffmpeg command
                 os.system(f"ffmpeg -i {temp_video_path} -vn -acodec mp3 {temp_audio_path} -y")
         else:
-            # Use ffmpeg directly
             os.system(f"ffmpeg -i {temp_video_path} -vn -acodec mp3 {temp_audio_path} -y")
-        
+
         # Step 2: Transcribe audio using Whisper API
         task_status[task_id].message = "Transcribing audio..."
         transcript = processor.transcribe_audio(temp_audio_path)
-        
+
         # Step 3: Analyze content using ChatGPT
         task_status[task_id].message = "Analyzing content..."
         analysis = processor.analyze_content(transcript)
-        
+
         # Step 4: Generate images using DALL-E
         task_status[task_id].message = "Generating images..."
         image_urls = processor.generate_images(analysis, num_images=3)
-        
+
         # Step 5: Create results file
         task_status[task_id].message = "Creating results file..."
         results = {
@@ -355,28 +347,27 @@ async def process_video_background(task_id: str, video_file: UploadFile):
             "image_urls": image_urls,
             "timestamp": datetime.now().isoformat()
         }
-        
         results_file_path = os.path.join(processor.output_dir, f"{task_id}_results.json")
         with open(results_file_path, "w") as f:
             json.dump(results, f, indent=2)
-        
+
         # Step 6: Upload results to S3
         task_status[task_id].message = "Uploading results to S3..."
         s3_key = f"results/{task_id}_results.json"
         s3_url = processor.upload_to_s3(results_file_path, s3_key)
-        
+
         # Clean up temporary files
         try:
             os.remove(temp_video_path)
             os.remove(temp_audio_path)
         except:
             pass
-        
+
         # Update status to completed
         task_status[task_id].status = "completed"
         task_status[task_id].message = "Video processing completed successfully"
         task_status[task_id].s3_url = s3_url
-        
+
     except Exception as e:
         task_status[task_id].status = "error"
         task_status[task_id].message = f"Processing failed: {str(e)}"
