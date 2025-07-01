@@ -215,8 +215,7 @@ class VideoProcessor:
             self.s3_client.upload_file(
                 file_path,
                 self.s3_bucket,
-                s3_key,
-                ExtraArgs={'ACL': 'public-read'}
+                s3_key
             )
             
             s3_url = f"https://{self.s3_bucket}.s3.amazonaws.com/{s3_key}"
