@@ -259,9 +259,11 @@ class VideoProcessor:
                 input_args += ['-i', img_path]
                 start_time = (idx + 1) * interval
                 filter_complex.append(f"[{idx+1}:v]format=rgba[img{idx}];")
-                overlay_stream = f"{overlay_stream}[img{idx}]overlay=enable='between(t,{start_time},{start_time+2})':x=(main_w-overlay_w)/2:y=(main_h-overlay_h)/2"
+                # For all but the last overlay, chain to [tmpN], for the last, chain to [v]
                 if idx < n_images - 1:
-                    overlay_stream += f"[tmp{idx}];[tmp{idx}]"
+                    overlay_stream = f"{overlay_stream}[img{idx}]overlay=enable='between(t,{start_time},{start_time+2})':x=(main_w-overlay_w)/2:y=(main_h-overlay_h)/2[tmp{idx}];[tmp{idx}]"
+                else:
+                    overlay_stream = f"{overlay_stream}[img{idx}]overlay=enable='between(t,{start_time},{start_time+2})':x=(main_w-overlay_w)/2:y=(main_h-overlay_h)/2[v]"
             filter_complex_str = ''.join(filter_complex) + overlay_stream
             cmd = [
                 'ffmpeg', '-y', *input_args,
