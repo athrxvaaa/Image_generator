@@ -166,13 +166,13 @@ class VideoProcessor:
             raise
 
     def generate_images(self, description: str, num_images: int = 3) -> List[str]:
-        """Generate images based on description using DALL-E"""
+        """Generate images based on description using GPT-Image-1 (portrait, standard quality)"""
         try:
             print(f"Generating {num_images} images based on description...")
             
             # Create a detailed prompt for image generation
             image_prompt = f"""
-            Create a high-quality, realistic image based on this description: {description}
+            Create a high-quality, realistic portrait image based on this description: {description}
             
             Requirements:
             - High resolution and professional quality
@@ -182,6 +182,7 @@ class VideoProcessor:
             - Clear and focused subject matter
             
             Style: Photorealistic, professional photography
+            Orientation: Portrait
             """
             
             image_urls = []
@@ -189,9 +190,9 @@ class VideoProcessor:
                 print(f"Generating image {i+1}/{num_images}...")
                 
                 response = self.openai_client.images.generate(
-                    model="dall-e-3",
+                    model="gpt-image-1",
                     prompt=image_prompt,
-                    size="1024x1024",
+                    size="1024x1792",  # Portrait size supported by OpenAI
                     quality="standard",
                     n=1
                 )
