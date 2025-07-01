@@ -381,6 +381,16 @@ async def test_endpoint():
         "timestamp": datetime.now().isoformat()
     }
 
+@app.get("/download/{task_id}")
+async def download_results(task_id: str):
+    results_file_path = os.path.join("output", f"{task_id}_results.json")
+    if os.path.exists(results_file_path):
+        return FileResponse(results_file_path, media_type="application/json", filename=f"{task_id}_results.json")
+    else:
+        # Return the S3 URL if the file is not found locally
+        s3_url = f"https://{os.getenv('S3_BUCKET_NAME')}.s3.amazonaws.com/results/{task_id}_results.json"
+        return {"detail": "Not Found locally. Download from S3.", "s3_url": s3_url}
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000) 
