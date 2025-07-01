@@ -30,7 +30,7 @@ except ImportError:
 
 from dotenv import load_dotenv
 import openai
-from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks
+from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, Form
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
@@ -310,7 +310,8 @@ async def health_check():
 @app.post("/process-video", response_model=ProcessingStatus)
 async def process_video(
     background_tasks: BackgroundTasks,
-    video_file: UploadFile = File(...)
+    video_file: UploadFile = File(...),
+    num_images: int = Form(3)
 ):
     """Process uploaded video and generate relevant images"""
     try:
@@ -335,8 +336,8 @@ async def process_video(
         message="Video uploaded, starting processing..."
     )
 
-    # Add background task with the saved file path
-    background_tasks.add_task(process_video_background, task_id, temp_video_path)
+    # Add background task with the saved file path and num_images
+    background_tasks.add_task(process_video_background, task_id, temp_video_path, num_images)
 
     return task_status[task_id]
 
@@ -361,7 +362,7 @@ async def get_status(task_id: str):
         status.s3_url = s3_url
     return status
 
-async def process_video_background(task_id: str, temp_video_path: str):
+async def process_video_background(task_id: str, temp_video_path: str, num_images: int = 3):
     """Background task to process video"""
     try:
         task_status[task_id].status = "processing"
@@ -388,9 +389,9 @@ async def process_video_background(task_id: str, temp_video_path: str):
         analysis = processor.analyze_content(transcript)
         # Step 4: Generate images using DALL-E
         task_status[task_id].message = "Generating images..."
-        image_urls = processor.generate_images(analysis, num_images=3, task_id=task_id)
+        image_urls = processor.generate_images(analysis, num_images=num_images, task_id=task_id)
         # Step 5: Create video with images
-        image_paths = [os.path.join(processor.output_dir, f"{task_id}_image_{i+1}.png") for i in range(3)]
+        image_paths = [os.path.join(processor.output_dir, f"{task_id}_image_{i+1}.png") for i in range(num_images)]
         processed_video_path = os.path.join(processor.output_dir, f"{task_id}_with_images.mp4")
         if all(os.path.exists(p) for p in image_paths):
             processor.create_video_with_images(temp_video_path, image_paths, processed_video_path)
