@@ -56,6 +56,7 @@ class ProcessingStatus(BaseModel):
     progress: Optional[float] = None
     download_url: Optional[str] = None
     s3_url: Optional[str] = None
+    s3_presigned_url: Optional[str] = None
 
 # Global storage for task status
 task_status = {}
@@ -301,6 +302,19 @@ class VideoProcessor:
             print(f"Error getting video duration: {e}")
             return 0.0
 
+    def generate_presigned_url(self, s3_key: str, expiration: int = 3600) -> str:
+        """Generate a pre-signed S3 URL for downloading a file."""
+        try:
+            url = self.s3_client.generate_presigned_url(
+                'get_object',
+                Params={'Bucket': self.s3_bucket, 'Key': s3_key},
+                ExpiresIn=expiration
+            )
+            return url
+        except Exception as e:
+            print(f"Error generating pre-signed URL: {e}")
+            return None
+
 # Initialize video processor lazily
 processor = None
 
@@ -377,7 +391,6 @@ async def get_status(task_id: str):
     status = task_status.get(task_id)
     if not status:
         raise HTTPException(status_code=404, detail="Task ID not found")
-    # Try to set download_url and s3_url if not already set
     processor = None
     try:
         processor = get_processor()
@@ -387,8 +400,10 @@ async def get_status(task_id: str):
         results_file_path = os.path.join(processor.output_dir, f"{task_id}_results.json")
         if os.path.exists(results_file_path):
             status.download_url = f"/download/{task_id}"
-        s3_key = f"results/{task_id}_results.json"
-        s3_url = f"https://{processor.s3_bucket}.s3.amazonaws.com/{s3_key}"
+        s3_key = f"results/{task_id}_with_images.mp4"
+        status.s3_presigned_url = processor.generate_presigned_url(s3_key)
+        s3_key_json = f"results/{task_id}_results.json"
+        s3_url = f"https://{processor.s3_bucket}.s3.amazonaws.com/{s3_key_json}"
         status.s3_url = s3_url
     return status
 
@@ -416,6 +431,7 @@ async def process_video_background(task_id: str, temp_video_path: str, num_image
         existing_image_paths = [p for p in image_paths if os.path.exists(p)]
         missing_images = [p for p in image_paths if not os.path.exists(p)]
         processed_video_path = os.path.join(processor.output_dir, f"{task_id}_with_images.mp4")
+        s3_presigned_url = None
         if existing_image_paths:
             print(f"Images found for video creation: {existing_image_paths}")
             if missing_images:
@@ -424,6 +440,7 @@ async def process_video_background(task_id: str, temp_video_path: str, num_image
             if result and os.path.exists(processed_video_path):
                 s3_video_key = f"results/{task_id}_with_images.mp4"
                 processor.upload_to_s3(processed_video_path, s3_video_key)
+                s3_presigned_url = processor.generate_presigned_url(s3_video_key)
             else:
                 print(f"Error: Video creation failed for task {task_id}.")
                 task_status[task_id].status = "error"
@@ -459,6 +476,7 @@ async def process_video_background(task_id: str, temp_video_path: str, num_image
             task_status[task_id].status = "completed"
             task_status[task_id].message = "Video processing completed successfully"
             task_status[task_id].s3_url = s3_url
+            task_status[task_id].s3_presigned_url = s3_presigned_url
     except Exception as e:
         task_status[task_id].status = "error"
         task_status[task_id].message = f"Processing failed: {str(e)}"
