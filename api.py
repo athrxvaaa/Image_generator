@@ -117,10 +117,186 @@ class VideoProcessor:
             print(f"Error transcribing audio: {e}")
             raise
 
-    def analyze_content(self, transcript: str) -> str:
-        """Analyze transcript content using ChatGPT"""
+    def analyze_content(self, transcript: str) -> list:
+        """Analyze transcript content and divide into segments with keywords"""
         try:
-            print("Analyzing transcript content...")
+            print("Analyzing transcript content and dividing into segments...")
+            
+            # First, divide transcript into sentences/segments
+            sentences = self._divide_transcript(transcript)
+            
+            segments_with_keywords = []
+            
+            for i, sentence in enumerate(sentences):
+                prompt = f"""
+                Analyze this sentence from a video transcript and extract key visual elements for image generation:
+                
+                Sentence: {sentence}
+                
+                Please provide:
+                1. A concise visual description (2-3 sentences) focused on the main visual elements
+                2. Key keywords that represent the most important visual aspects
+                3. The mood or atmosphere of this scene
+                
+                Format your response as JSON:
+                {{
+                    "description": "visual description here",
+                    "keywords": ["keyword1", "keyword2", "keyword3"],
+                    "mood": "mood description",
+                    "sentence": "original sentence"
+                }}
+                """
+                
+                response = self.openai_client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=[
+                        {"role": "system", "content": "You are an expert content analyst who extracts visual elements for image generation. Always respond with valid JSON."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    max_tokens=300,
+                    temperature=0.7
+                )
+                
+                try:
+                    import json
+                    analysis = json.loads(response.choices[0].message.content)
+                    analysis['segment_id'] = i + 1
+                    segments_with_keywords.append(analysis)
+                except json.JSONDecodeError:
+                    # Fallback if JSON parsing fails
+                    segments_with_keywords.append({
+                        "description": sentence,
+                        "keywords": sentence.split()[:5],  # First 5 words as keywords
+                        "mood": "neutral",
+                        "sentence": sentence,
+                        "segment_id": i + 1
+                    })
+            
+            print(f"Content analysis completed - {len(segments_with_keywords)} segments created")
+            return segments_with_keywords
+            
+        except Exception as e:
+            print(f"Error analyzing content: {e}")
+            raise
+
+    def _divide_transcript(self, transcript: str) -> list:
+        """Divide transcript into meaningful segments"""
+        try:
+            # Split by sentences (periods, exclamation marks, question marks)
+            import re
+            sentences = re.split(r'[.!?]+', transcript)
+            
+            # Clean up sentences and filter out empty ones
+            sentences = [s.strip() for s in sentences if s.strip()]
+            
+            # If we have too many sentences, group them into segments
+            if len(sentences) > 10:
+                # Group sentences into segments of 2-3 sentences each
+                segments = []
+                for i in range(0, len(sentences), 2):
+                    segment = ' '.join(sentences[i:i+2])
+                    segments.append(segment)
+                return segments
+            
+            return sentences
+            
+        except Exception as e:
+            print(f"Error dividing transcript: {e}")
+            # Fallback: return transcript as single segment
+            return [transcript]
+
+    def generate_images(self, segments: list, num_images_per_segment: int = 1, task_id: str = None) -> dict:
+        """Generate images based on each segment's description and keywords"""
+        all_images = {}
+        try:
+            print(f"Generating images for {len(segments)} segments...")
+            
+            for segment in segments:
+                segment_id = segment['segment_id']
+                description = segment['description']
+                keywords = segment['keywords']
+                mood = segment['mood']
+                
+                print(f"Generating image for segment {segment_id}: {description[:50]}...")
+                
+                # Create specific prompt for this segment
+                image_prompt = f"""
+                Create a high-quality, realistic image based on this specific scene: {description}
+                
+                Key visual elements: {', '.join(keywords)}
+                Mood/atmosphere: {mood}
+                
+                Requirements:
+                - High resolution and professional quality
+                - Realistic and detailed
+                - Focus on the specific visual elements mentioned
+                - Match the described mood and atmosphere
+                - Clear and focused subject matter
+                Style: Photorealistic, professional photography
+                """
+                
+                segment_images = []
+                for i in range(num_images_per_segment):
+                    try:
+                        response = self.openai_client.images.generate(
+                            model="gpt-image-1",
+                            prompt=image_prompt,
+                            size="1024x1536",
+                            quality="medium",
+                            n=1
+                        )
+                        
+                        image_url = None
+                        if hasattr(response, "data") and response.data:
+                            data = response.data[0]
+                            if hasattr(data, "url") and data.url:
+                                image_url = data.url
+                            elif hasattr(data, "b64_json") and data.b64_json:
+                                # Save base64 image to PNG
+                                img_data = base64.b64decode(data.b64_json)
+                                img_path = os.path.join(self.output_dir, f"{task_id}_segment_{segment_id}_image_{i+1}.png")
+                                with open(img_path, "wb") as img_file:
+                                    img_file.write(img_data)
+                                # Upload to S3
+                                s3_key = f"results/{task_id}_segment_{segment_id}_image_{i+1}.png"
+                                image_url = self.upload_to_s3(img_path, s3_key)
+                            else:
+                                image_url = f"ERROR: No image data returned for segment {segment_id}"
+                        else:
+                            image_url = f"ERROR: No image data returned for segment {segment_id}"
+                        
+                        segment_images.append({
+                            "url": image_url,
+                            "description": description,
+                            "keywords": keywords,
+                            "mood": mood
+                        })
+                        
+                    except Exception as e:
+                        print(f"Error generating image for segment {segment_id}: {e}")
+                        segment_images.append({
+                            "url": f"ERROR: {str(e)}",
+                            "description": description,
+                            "keywords": keywords,
+                            "mood": mood
+                        })
+                
+                all_images[f"segment_{segment_id}"] = {
+                    "images": segment_images,
+                    "segment_data": segment
+                }
+            
+            print(f"All images generated for {len(segments)} segments")
+            return all_images
+            
+        except Exception as e:
+            print(f"Error in generate_images: {e}")
+            return {"error": str(e)}
+
+    def _fallback_analyze_content(self, transcript: str) -> str:
+        """Fallback method for content analysis (original approach)"""
+        try:
+            print("Using fallback content analysis...")
             
             prompt = f"""
             Analyze the following video transcript and provide a detailed description of the content, 
@@ -151,18 +327,18 @@ class VideoProcessor:
             )
             
             analysis = response.choices[0].message.content
-            print("Content analysis completed")
+            print("Fallback content analysis completed")
             return analysis
             
         except Exception as e:
-            print(f"Error analyzing content: {e}")
-            raise
+            print(f"Error in fallback content analysis: {e}")
+            return transcript
 
-    def generate_images(self, description: str, num_images: int = 3, task_id: str = None) -> list:
-        """Generate images based on description using GPT-Image-1 (portrait, medium quality)"""
-        image_urls = []
+    def _fallback_generate_images(self, description: str, num_images: int = 3, task_id: str = None) -> dict:
+        """Fallback method for image generation (original approach)"""
         try:
-            print(f"Generating {num_images} images based on description...")
+            print(f"Using fallback image generation for {num_images} images...")
+            
             image_prompt = f"""
             Create a high-quality, realistic portrait image based on this description: {description}
             Requirements:
@@ -174,8 +350,10 @@ class VideoProcessor:
             Style: Photorealistic, professional photography
             Orientation: Portrait
             """
+            
+            segment_images = []
             for i in range(num_images):
-                print(f"Generating image {i+1}/{num_images}...")
+                print(f"Generating fallback image {i+1}/{num_images}...")
                 try:
                     response = self.openai_client.images.generate(
                         model="gpt-image-1",
@@ -184,9 +362,8 @@ class VideoProcessor:
                         quality="medium",
                         n=1
                     )
-                    print(f"OpenAI image response: {response}")
+                    
                     image_url = None
-                    # Handle b64_json (base64 image)
                     if hasattr(response, "data") and response.data:
                         data = response.data[0]
                         if hasattr(data, "url") and data.url:
@@ -194,26 +371,49 @@ class VideoProcessor:
                         elif hasattr(data, "b64_json") and data.b64_json:
                             # Save base64 image to PNG
                             img_data = base64.b64decode(data.b64_json)
-                            img_path = os.path.join(self.output_dir, f"{task_id}_image_{i+1}.png")
+                            img_path = os.path.join(self.output_dir, f"{task_id}_fallback_image_{i+1}.png")
                             with open(img_path, "wb") as img_file:
                                 img_file.write(img_data)
                             # Upload to S3
-                            s3_key = f"results/{task_id}_image_{i+1}.png"
+                            s3_key = f"results/{task_id}_fallback_image_{i+1}.png"
                             image_url = self.upload_to_s3(img_path, s3_key)
                         else:
-                            image_url = f"ERROR: No image URL or b64_json returned. Response: {response}"
+                            image_url = f"ERROR: No image data returned for fallback image {i+1}"
                     else:
-                        image_url = f"ERROR: No image data returned. Response: {response}"
-                    image_urls.append(image_url)
-                    print(f"Image {i+1} generated: {image_url}")
+                        image_url = f"ERROR: No image data returned for fallback image {i+1}"
+                    
+                    segment_images.append({
+                        "url": image_url,
+                        "description": description,
+                        "keywords": [],
+                        "mood": "neutral"
+                    })
+                    
                 except Exception as e:
-                    print(f"Error generating image {i+1}: {e}")
-                    image_urls.append(f"ERROR: {str(e)}")
-            print(f"All {num_images} images processed.")
-            return image_urls
+                    print(f"Error generating fallback image {i+1}: {e}")
+                    segment_images.append({
+                        "url": f"ERROR: {str(e)}",
+                        "description": description,
+                        "keywords": [],
+                        "mood": "neutral"
+                    })
+            
+            return {
+                "segment_1": {
+                    "images": segment_images,
+                    "segment_data": {
+                        "segment_id": 1,
+                        "description": description,
+                        "keywords": [],
+                        "mood": "neutral",
+                        "sentence": description
+                    }
+                }
+            }
+            
         except Exception as e:
-            print(f"Error in generate_images: {e}")
-            return [f"ERROR: {str(e)}"] * num_images
+            print(f"Error in fallback image generation: {e}")
+            return {"error": str(e)}
 
     def upload_to_s3(self, file_path: str, s3_key: str) -> str:
         """Upload file to S3 and return public URL"""
@@ -355,9 +555,9 @@ async def health_check():
 async def process_video(
     background_tasks: BackgroundTasks,
     video_file: UploadFile = File(...),
-    num_images: int = Form(3)
+    num_images_per_segment: int = Form(1)
 ):
-    """Process uploaded video and generate relevant images"""
+    """Process uploaded video and generate relevant images for each transcript segment"""
     try:
         processor = get_processor()
     except HTTPException:
@@ -380,8 +580,8 @@ async def process_video(
         message="Video uploaded, starting processing..."
     )
 
-    # Add background task with the saved file path and num_images
-    background_tasks.add_task(process_video_background, task_id, temp_video_path, num_images)
+    # Add background task with the saved file path and num_images_per_segment
+    background_tasks.add_task(process_video_background, task_id, temp_video_path, num_images_per_segment)
 
     return task_status[task_id]
 
@@ -407,8 +607,8 @@ async def get_status(task_id: str):
         status.s3_url = s3_url
     return status
 
-async def process_video_background(task_id: str, temp_video_path: str, num_images: int = 3):
-    """Background task to process video"""
+async def process_video_background(task_id: str, temp_video_path: str, num_images_per_segment: int = 1):
+    """Background task to process video and generate images for each segment"""
     try:
         task_status[task_id].status = "processing"
         task_status[task_id].message = "Processing video..."
@@ -420,14 +620,42 @@ async def process_video_background(task_id: str, temp_video_path: str, num_image
         # Step 2: Transcribe audio using Whisper API
         task_status[task_id].message = "Transcribing audio..."
         transcript = processor.transcribe_audio(temp_audio_path)
-        # Step 3: Analyze content using ChatGPT
-        task_status[task_id].message = "Analyzing content..."
-        analysis = processor.analyze_content(transcript)
-        # Step 4: Generate images using DALL-E
-        task_status[task_id].message = "Generating images..."
-        image_urls = processor.generate_images(analysis, num_images=num_images, task_id=task_id)
+        # Step 3: Analyze content using ChatGPT and divide into segments
+        task_status[task_id].message = "Analyzing content and dividing into segments..."
+        try:
+            segments = processor.analyze_content(transcript)
+            # Step 4: Generate images using DALL-E for each segment
+            task_status[task_id].message = "Generating images for each segment..."
+            all_images = processor.generate_images(segments, num_images_per_segment=num_images_per_segment, task_id=task_id)
+        except Exception as e:
+            print(f"Error in new segmented approach, falling back to original method: {e}")
+            # Fallback to original approach
+            task_status[task_id].message = "Using fallback method for content analysis..."
+            analysis = processor._fallback_analyze_content(transcript)
+            all_images = processor._fallback_generate_images(analysis, num_images_per_segment, task_id)
+            segments = [{"segment_id": 1, "description": analysis, "keywords": [], "mood": "neutral", "sentence": transcript}]
         # Step 5: Create video with images (robust check)
-        image_paths = [os.path.join(processor.output_dir, f"{task_id}_image_{i+1}.png") for i in range(num_images)]
+        # Get all generated image paths
+        image_paths = []
+        for segment_key, segment_data in all_images.items():
+            if "images" in segment_data and isinstance(segment_data["images"], list):
+                for i, image_data in enumerate(segment_data["images"]):
+                    if isinstance(image_data, dict) and "url" in image_data and not image_data["url"].startswith("ERROR"):
+                        try:
+                            # Handle both segmented and fallback approaches
+                            if segment_key.startswith("segment_"):
+                                # New segmented approach
+                                segment_id = segment_key.split("_")[1]
+                                img_path = os.path.join(processor.output_dir, f"{task_id}_segment_{segment_id}_image_{i+1}.png")
+                            else:
+                                # Fallback approach
+                                img_path = os.path.join(processor.output_dir, f"{task_id}_fallback_image_{i+1}.png")
+                            
+                            if os.path.exists(img_path):
+                                image_paths.append(img_path)
+                        except (IndexError, KeyError) as e:
+                            print(f"Error extracting segment_id from {segment_key}: {e}")
+                            continue
         existing_image_paths = [p for p in image_paths if os.path.exists(p)]
         missing_images = [p for p in image_paths if not os.path.exists(p)]
         processed_video_path = os.path.join(processor.output_dir, f"{task_id}_with_images.mp4")
@@ -454,8 +682,10 @@ async def process_video_background(task_id: str, temp_video_path: str, num_image
         results = {
             "task_id": task_id,
             "transcript": transcript,
-            "analysis": analysis,
-            "image_urls": image_urls,
+            "segments": segments,
+            "all_images": all_images,
+            "total_segments": len(segments),
+            "total_images_generated": len(image_paths),
             "timestamp": datetime.now().isoformat()
         }
         results_file_path = os.path.join(processor.output_dir, f"{task_id}_results.json")
