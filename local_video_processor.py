@@ -19,6 +19,13 @@ from typing import Optional, List, Dict, Tuple
 import requests
 from openai import OpenAI
 
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    print("python-dotenv not installed, using system environment variables")
+
 # Flask imports
 from flask import Flask, request, jsonify, send_file
 from werkzeug.utils import secure_filename
@@ -162,25 +169,47 @@ class LocalVideoProcessor:
     def transcribe_audio(self, audio_file_path: str) -> dict:
         """Transcribe audio using OpenAI Whisper API with timestamps"""
         try:
-            self.log(f"Transcribing audio file: {audio_file_path}")
+            self.log(f"🎯 STARTING TRANSCRIPTION PROCESS")
+            self.log(f"📁 Audio file path: {audio_file_path}")
+            self.log(f"📁 Audio file exists: {os.path.exists(audio_file_path)}")
+            self.log(f"📁 Audio file size: {os.path.getsize(audio_file_path)} bytes")
             
+            self.log("🔄 STEP 1: Opening audio file...")
             with open(audio_file_path, "rb") as audio_file:
+                self.log("✅ Audio file opened successfully")
+                self.log("🔄 STEP 2: Calling OpenAI Whisper API...")
+                self.log("🔄 API call parameters: model=whisper-1, response_format=verbose_json")
+                
                 transcript = self.openai_client.audio.transcriptions.create(
                     model="whisper-1",
                     file=audio_file,
                     response_format="verbose_json"
                 )
+                self.log("✅ OpenAI Whisper API response received")
+                self.log(f"📊 Response type: {type(transcript)}")
             
-            self.log("Transcription completed successfully with timestamps")
-            return transcript.model_dump()
+            self.log("🔄 STEP 3: Converting transcript to dict...")
+            result = transcript.model_dump()
+            self.log(f"✅ Transcript converted successfully")
+            self.log(f"📊 Result type: {type(result)}")
+            self.log(f"📊 Text length: {len(result.get('text', ''))} characters")
+            self.log(f"📊 Segments count: {len(result.get('segments', []))}")
+            self.log("🎯 TRANSCRIPTION PROCESS COMPLETED SUCCESSFULLY")
+            return result
             
         except Exception as e:
-            self.log(f"Error transcribing audio: {e}", "ERROR")
+            self.log(f"❌ TRANSCRIPTION FAILED", "ERROR")
+            self.log(f"❌ Error message: {e}", "ERROR")
+            self.log(f"❌ Error type: {type(e).__name__}", "ERROR")
+            self.log(f"❌ Error location: {e.__traceback__.tb_lineno if hasattr(e, '__traceback__') else 'unknown'}", "ERROR")
             raise
 
     def detect_video_context(self, transcript_data: dict) -> dict:
         """Dynamically detect video context, genre, and style using GPT-4o-mini"""
         try:
+            self.log("🎯 STARTING VIDEO CONTEXT DETECTION")
+            self.log(f"📊 Input transcript data type: {type(transcript_data)}")
+            self.log(f"📊 Transcript keys: {list(transcript_data.keys())}")
             self.log("Detecting video context and genre...")
             
             transcript_text = transcript_data.get('text', '')
@@ -305,6 +334,8 @@ class LocalVideoProcessor:
                 
                 context_data = json.loads(response_text)
                 self.log(f"✅ Detected context: {context_data.get('context', 'unknown')} - {context_data.get('genre', 'unknown')}")
+                self.log(f"📊 Context data keys: {list(context_data.keys())}")
+                self.log("🎯 VIDEO CONTEXT DETECTION COMPLETED SUCCESSFULLY")
                 return context_data
                 
             except json.JSONDecodeError as e:
@@ -319,10 +350,15 @@ class LocalVideoProcessor:
     def analyze_content(self, transcript_data: dict, video_duration: float = 60) -> tuple:
         """Analyze transcript content and create scenes with topic-based segmentation"""
         try:
+            self.log("🎯 STARTING CONTENT ANALYSIS")
+            self.log(f"📊 Video duration: {video_duration} seconds")
+            self.log(f"📊 Transcript data type: {type(transcript_data)}")
             self.log("Analyzing transcript content with topic-based segmentation and improved context...")
             
             # Detect video context and genre
+            self.log("🔄 STEP 1: Calling detect_video_context...")
             video_context = self.detect_video_context(transcript_data)
+            self.log("✅ detect_video_context completed")
             
             # Calculate number of images based on configuration
             if self.fixed_image_count:
@@ -336,8 +372,12 @@ class LocalVideoProcessor:
                 self.log(f"Calculation: {video_duration/60:.1f} min × {self.images_per_minute} per min = {calculated_images}, bounded by {self.min_images}-{self.max_images}")
             
             # Use topic-based segmentation for improved visual accuracy
+            self.log("🔄 STEP 2: Calling _create_topic_based_scenes...")
             self.log("Using topic-based segmentation for improved visual accuracy...")
             scenes = self._create_topic_based_scenes(transcript_data, video_duration, num_images, video_context)
+            self.log("✅ _create_topic_based_scenes completed")
+            self.log(f"📊 Scenes created: {len(scenes)}")
+            self.log("🎯 CONTENT ANALYSIS COMPLETED SUCCESSFULLY")
             
             return scenes, video_context
             
@@ -348,6 +388,10 @@ class LocalVideoProcessor:
     def _create_topic_based_scenes(self, transcript_data: dict, video_duration: float, num_images: int, video_context: dict) -> list:
         """Create scenes based on topic analysis of the entire transcript"""
         try:
+            self.log("🎯 STARTING TOPIC-BASED SCENE CREATION")
+            self.log(f"📊 Video duration: {video_duration}")
+            self.log(f"📊 Number of images: {num_images}")
+            self.log(f"📊 Video context type: {type(video_context)}")
             self.log("Analyzing entire script for important topics and word-level timestamps...")
             
             # Get transcript text and segments
@@ -425,6 +469,8 @@ class LocalVideoProcessor:
                 scenes = self._create_word_level_scenes(segments, analysis_data, num_images, video_context, video_duration)
                 
                 self.log(f"Topic-based content analysis completed - {len(scenes)} scenes created with natural topic alignment")
+                self.log(f"📊 Final scenes count: {len(scenes)}")
+                self.log("🎯 TOPIC-BASED SCENE CREATION COMPLETED SUCCESSFULLY")
                 return scenes
                 
             except json.JSONDecodeError as e:
@@ -439,6 +485,10 @@ class LocalVideoProcessor:
     def _create_word_level_scenes(self, segments: list, analysis_data: dict, num_images: int, video_context: dict, video_duration: float = 60) -> list:
         """Create scenes based on word-level timestamps and topic analysis"""
         try:
+            self.log("🎯 STARTING WORD-LEVEL SCENE CREATION")
+            self.log(f"📊 Segments count: {len(segments)}")
+            self.log(f"📊 Analysis data keys: {list(analysis_data.keys())}")
+            self.log(f"📊 Number of images: {num_images}")
             self.log("Creating word-level timestamped scenes with topic-based prompts...")
             
             # Extract analysis data
@@ -544,10 +594,13 @@ class LocalVideoProcessor:
                     "end_time": timestamp + fallback_duration
                 })
             
+            self.log(f"📊 Final scenes count: {len(scenes)}")
+            self.log("🎯 WORD-LEVEL SCENE CREATION COMPLETED SUCCESSFULLY")
             return scenes
                 
         except Exception as e:
-            self.log(f"Error creating word-level scenes: {e}", "ERROR")
+            self.log(f"❌ WORD-LEVEL SCENE CREATION FAILED", "ERROR")
+            self.log(f"❌ Error creating word-level scenes: {e}", "ERROR")
             raise
 
     def _find_key_moments(self, segments: list, main_topics: list, key_concepts: list, video_duration: float = 60) -> list:
@@ -742,7 +795,11 @@ class LocalVideoProcessor:
         """Generate images based on analyzed scenes using GPT-Image-1"""
         all_images = {}
         try:
+            self.log("🎯 STARTING IMAGE GENERATION PROCESS")
             num_images = len(scenes)
+            self.log(f"📊 Number of scenes to process: {num_images}")
+            self.log(f"📊 Video name: {video_name}")
+            self.log(f"📊 Video context type: {type(video_context)}")
             self.log(f"Generating {num_images} images based on enhanced scene analysis...")
             
             for i, scene in enumerate(scenes):
@@ -769,6 +826,7 @@ class LocalVideoProcessor:
                 self.log(f"📝 Image Prompt for Scene {scene_id}: {image_prompt}")
                 
                 try:
+                    self.log(f"🔄 Calling OpenAI API for image generation...")
                     response = self.openai_client.images.generate(
                         model="gpt-image-1",
                         prompt=image_prompt,
@@ -776,6 +834,7 @@ class LocalVideoProcessor:
                         quality="medium",
                         n=1
                     )
+                    self.log(f"✅ OpenAI API response received for scene {scene_id}")
                     
                     if response.data and len(response.data) > 0:
                         data = response.data[0]
@@ -828,13 +887,16 @@ class LocalVideoProcessor:
                         all_images[f"scene_{scene_id}"] = {"error": "No image data received"}
                     
                 except Exception as e:
-                    print(f"❌ Error generating image for scene {scene_id}: {e}")
+                    self.log(f"❌ Error generating image for scene {scene_id}: {e}", "ERROR")
                     all_images[f"scene_{scene_id}"] = {"error": str(e)}
             
+            self.log(f"📊 Total images processed: {len(all_images)}")
+            self.log("🎯 IMAGE GENERATION PROCESS COMPLETED SUCCESSFULLY")
             return all_images
             
         except Exception as e:
-            print(f"Error in image generation: {e}")
+            self.log(f"❌ IMAGE GENERATION PROCESS FAILED", "ERROR")
+            self.log(f"❌ Error in image generation: {e}", "ERROR")
             raise
 
     def extract_audio_ffmpeg(self, video_path: str, audio_path: str):
@@ -978,7 +1040,10 @@ class LocalVideoProcessor:
     def process_video_file(self, video_path: str):
         """Process a single video file with enhanced analysis and optimized for up to 5 minutes"""
         try:
+            self.log("🎯 STARTING VIDEO PROCESSING PIPELINE")
             video_name = Path(video_path).stem
+            self.log(f"📁 Video path: {video_path}")
+            self.log(f"📁 Video name: {video_name}")
             self.log(f"\n{'='*60}")
             self.log(f"🎬 PROCESSING: {video_name}")
             self.log(f"{'='*60}")
@@ -1031,6 +1096,7 @@ class LocalVideoProcessor:
             
             self.log(f"✅ SUCCESS: {video_name} ({successful_images}/{num_images} images generated)")
             self.log(f"{'='*60}")
+            self.log("🎯 VIDEO PROCESSING PIPELINE COMPLETED SUCCESSFULLY")
             return True
             
         except Exception as e:
@@ -1241,7 +1307,7 @@ def update_config():
         
         log_capture.add_log(f"⚙️ Configuration updated: {config}")
         return jsonify({"success": True, "config": config})
-        
+            
     except Exception as e:
         log_capture.add_log(f"❌ Configuration update failed: {str(e)}", "ERROR")
         return jsonify({"error": "Configuration update failed", "message": str(e)}), 500
@@ -1296,10 +1362,10 @@ def main():
         log_capture.add_log("   • GET /health - Health check")
         log_capture.add_log("   • GET /status - Get processing status and logs")
         log_capture.add_log("")
-        log_capture.add_log("🚀 Starting Flask server on http://localhost:5000")
+        log_capture.add_log("🚀 Starting Flask server on http://localhost:8000")
         
         # Start Flask server
-        app.run(host='0.0.0.0', port=5000, debug=False)
+        app.run(host='0.0.0.0', port=8000, debug=False)
         
     except Exception as e:
         log_capture.add_log(f"❌ Error: {e}", "ERROR")
